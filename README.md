@@ -255,3 +255,81 @@ Our goal is to get in contact with our event attendees. It is not to define a CS
 Look for a Solution before Building a Solution
 
 Ruby actually provides a CSV parser that we will use instead throughout the remainder of this exercise.
+
+## Iteration 1: Parsing with CSV
+
+It is likely the case that if you want to solve a problem, someone has already done it in some capacity. They may have even been kind enough to share their solution or the tools that they created. This is the kind of goodwill that pervades the Open Source community and Ruby ecosystem.
+
+In this iteration we are going to convert our current CSV parser to use Ruby’s [CSV](http://rubydoc.info/stdlib/csv). We will then use this new parser to access our attendees’ zip codes.
+
+### Switching over to use the CSV Library
+
+Ruby’s core language comes with a wealth of great classes. Not all of them are loaded every single time ruby code is executed. This ensures unneeded functionality is not loaded unless required, preventing ruby from having slower start up times.
+
+You can browse the many libraries available through the [documentation](http://rubydoc.info/stdlib).
+
+```ruby
+require 'csv'
+puts 'EventManager initialized.'
+
+contents = CSV.open('event_attendees.csv', headers: true)
+contents.each do |row|
+  name = row[2]
+  puts name
+end
+```
+
+First we need to tell Ruby that we want it to load the CSV library. This is done through the `require` method which accepts a parameter of the functionality to load.
+
+The way [CSV](http://rubydoc.info/stdlib/csv) loads and parses data is very similar to what we previously defined.
+
+Instead of `read` or `readlines` we use CSV’s `open` method to load our file. The library also supports the concept of headers and so we provide some additional parameters which state this file has headers.
+
+There are pros and cons to using an external library. One of the pros is that this library makes it easy for us to express that our file has headers. One of the cons is that we have to learn how the library is implemented.
+
+### Accessing Columns by their Names
+
+CSV files with headers have an additional option which allows you to access the column values by their headers. Our CSV file defines several different formats for the column names. The CSV library provides an additional option which allows us to convert the header names to symbols.
+
+Converting the headers to symbols will make our column names more uniform and easier to remember. The header “first_Name” will be converted to `:first_name` and “HomePhone” will be converted to `:homephone`.
+
+```ruby
+require 'csv'
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true, 
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+  puts name
+end
+```
+
+### Displaying the Zip Codes of All Attendees
+
+Accessing the zipcode is very easy using the new header name, `:zipcode`.
+
+```ruby
+require 'csv'
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+  zipcode = row[:zipcode]
+  puts "#{name} #{zipcode}"
+end
+```
+
+We now are able to output the name of the individual and their zipcode.
+
+Now that we are able to visualize both pieces of data we realize that we have a problem….
