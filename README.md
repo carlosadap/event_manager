@@ -582,3 +582,298 @@ def clean_zipcode(zipcode)
   zipcode.to_s.rjust(5, '0')[0..4]
 end
 ```
+
+## Iteration 3: Using Google’s Civic Information
+
+We now have our list of attendees with their valid zip codes (at least for most of them). Using their zip code and the [Google Civic Information](https://developers.google.com/civic-information/) webservice, we are able to query for the representatives of a given area.
+
+The Civic Information API allows registered individuals (registration is free) to obtain some information about the representatives for each level of government for an address.
+
+For any U.S. residential address, you can look up who represents that address at each elected level of government. During supported elections, you can also look up polling places, early vote location, candidate data, and other election official information.
+
+### Accessing the API
+
+Take a close look at this sample URL for accessing the Civic Information API.
+
+https://www.googleapis.com/civicinfo/v2/representatives?address=80203&levels=country&roles=legislatorUpperBody&roles=legislatorLowerBody&key=AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw
+
+Here’s how it breaks down:
+
+- `https://` : Use the Secure HTTP protocol
+- `www.googleapis.com/civicinfo/v2/` : The API server address on the internet
+- `representatives` : The method called on that server
+- `?` : Parameters to the method
+  - `&` : The parameter separator
+  - `address=80203` : The zipcode we want to lookup
+  - `levels=country` : The level of government we want to select
+  - `roles=legislatorUpperBody` : Return the representatives from the Senate
+  - `roles=legislatorLowerBody` : Returns the representatives from the House
+  - `key=AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw` : A registered API Key to authenticate our requests
+
+When we’re accessing the `representatives` method of their API, we’re sending in a `key` which is the string that identifies JumpstartLab as the accessor of the API, then we’re selecting the data we want returned to us using the `address`, `levels`, and `roles` criteria. Try modifying the address with your own zipcode and load the page.
+
+This document is [JSON](http://json.org/) formatted. If you copy and paste the data into a [pretty printer](https://jsonformatter.org/json-pretty-print), you can see there is an `officials` key that has many legislator `names`. The response also includes a lot of other information. Cool!
+
+Let’s look for a solution before we attempt to build a solution.
+
+### Installing the Google API Client
+
+Ruby comes packaged with the `gem` command. This tool allows you to download libraries by simply knowing the name of the library you want to install.
+
+```ruby
+$ gem install google-api-client
+Successfully installed google-api-client-0.15.0
+1 gem installed
+```
+
+If you receive a signet error when installing the Google API gem, it is due to modern Ruby updates requiring an updated version of signet that is not compatible with the API. To fix, please [downgrade your version of signet](https://github.com/googleapis/google-api-ruby-client/issues/833) before installing the gem.
+
+### Showing All Legislators in a Zip Code
+
+The gem comes equipped with some vague example documentation. The documentation is also available online with their [source code](https://github.com/google/google-api-ruby-client).
+
+Reading through the documentation on how to set up and use the google-api-client gem, we find that we need to perform the following steps:
+
+- Set the API Key
+- Send the query with the given criteria
+- Parse the response for the names of your legislators.
+
+Exploration of data is easy using irb:
+
+```ruby
+$ require 'google/apis/civicinfo_v2'
+=> true
+
+$ civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+=> #<Google::Apis::CivicinfoV2::CivicInfoService:0x007faf2dd47108 ... >
+
+$ civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+=> "AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw"
+
+$ response = civic_info.representative_info_by_address(address: 80202, levels: 'country', roles: ['legislatorUpperBody', 'legislatorLowerBody'])
+=> #<Google::Apis::CivicinfoV2::RepresentativeInfoResponse:0x007faf2d9088d0 @divisions={"ocd-division/country:us/state:co"=>#<Google::Apis::CivicinfoV2::GeographicDivision:0x007faf2e55ea80 @name="Colorado", @office_indices=[0]> } > ...continues...
+```
+
+Whoa. That’s a lot of information. Buried in there are the names of our legislators. We can access them by calling the `.officials` method on the `response`. Now that we know how to access the information we want, we can focus our attention back on our program.
+
+```ruby
+require 'csv'
+require 'google/apis/civicinfo_v2'
+
+civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5, '0')[0..4]
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  legislators = civic_info.representative_info_by_address(
+    address: zipcode,
+    levels: 'country',
+    roles: ['legislatorUpperBody', 'legislatorLowerBody']
+  )
+  legislators = legislators.officials
+
+  puts "#{name} #{zipcode} #{legislators}"
+end
+```
+
+Running our application, we find an error.
+
+```ruby
+$ ruby lib/event_manager.rb
+/ruby-2.4.0/gems/google-api-client-0.15.0/lib/google/apis/core/http_command.rb:218:in 'check_status': parseError: Failed to parse address (Google::Apis::ClientError)
+```
+
+What does this mean? It means that the Google API was unable to use an address we gave it. When we dig further, we see that right before this error the information from David with a zip code of 07306 is printed. Looking at the data we can now see that the attendee after David did not enter a zip code. Data missing like this is common, so we have to have a way of dealing with it. Luckily, Ruby makes that easy with its [Exception Class](https://ruby-doc.org/core-2.2.0/Exception.html). We can add a `begin` and `rescue` clause to the API search to handle any errors.
+
+```ruby
+require 'csv'
+require 'google/apis/civicinfo_v2'
+
+civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5, '0')[0..4]
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  begin
+    legislators = civic_info.representative_info_by_address(
+      address: zipcode,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    )
+    legislators = legislators.officials
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+
+  puts "#{name} #{zipcode} #{legislators}"
+end
+```
+
+The **legislators** that we are displaying is an array. In turn, the array is sending the `to_s` message to each of the objects within the array, each legislator. The output that we are seeing is the *raw* legislator object.
+
+We really want to capture the first name and last name of each legislator.
+
+### Collecting the Names of the Legislators
+
+Instead of outputting each raw legislator we want to print only their first name and last name. We will need to complete the following steps:
+
+- For each zip code, iterate over the array of legislators.
+- For each legislator, we want to find the representative’s name.
+- Add the name to a new collection of names.
+
+To do this, we can use the [map](https://ruby-doc.org/core-2.2.0/Array.html#method-i-map) function built into ruby. It works just like `.each` but returns a new array of the data we want to include.
+
+```ruby
+legislator_names = legislators.map do |legislator|
+    legislator.name
+  end
+```
+
+We can further simplify this into its final form:
+
+```ruby
+legislator_names = legislators.map(&:name)
+```
+
+### Cleanly Displaying Legislators
+
+If we were to replace `legislators` with `legislator_names` in our output, we would be presented with a *slightly* better output.
+
+```ruby
+$ ruby lib/event_manager.rb
+EventManager initialized.
+Allison 20010 ["Eleanor Norton"]
+SArah 20009 ["Eleanor Norton"]
+Sarah 33703 ["Marco Rubio", "Bill Nelson", "C. Young"]
+...
+```
+
+The problem now is that when using string interpolation, Ruby is converting our new array of legislator names into a string, but Ruby does not know exactly how you want to display the contents.
+
+We need to explicitly convert our array of legislator names to a string. This way we are sure it will output correctly. This could be tedious work except Array again comes to the rescue with the [Array#join](http://rubydoc.info/stdlib/core/Array#join-instance_method) method.
+
+[Array#join](http://rubydoc.info/stdlib/core/Array#join-instance_method) allows the specification of a separator string. We want to create a comma-separated list of legislator names with `legislator_names.join(", ")`
+
+```ruby
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  begin
+    legislators = civic_info.representative_info_by_address(
+      address: zipcode,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    )
+    legislators = legislators.officials
+
+    legislator_names = legislators.map(&:name)
+
+    legislators_string = legislator_names.join(", ")
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+
+  puts "#{name} #{zipcode} #{legislators_string}"
+end
+```
+
+Running our application this time should give us a much more pleasant looking output:
+
+```ruby
+$ ruby lib/event_manager.rb
+EventManager initialized.
+Allison 20010 Eleanor Norton
+SArah 20009 Eleanor Norton
+Sarah 33703 Marco Rubio, Bill Nelson, C. Young
+...
+```
+
+### Moving Displaying Legislators to a Method
+
+Similar to before, with this step complete, we want to look at our implementation and ask ourselves:
+
+- Does the code clearly express what it is trying to accomplish?
+
+This code is fairly clear in its understanding. It is simply expressing its intent near so many other things. It is also expressing itself differently from how zip codes are handled. This dissimilarity breeds confusion when returning to the code.
+
+We want to extract our legislator names into a new method named `legislators_by_zipcode`, which accepts a single zip code as a parameter and returns a comma-separated string of legislator names.
+
+```ruby
+require 'csv'
+require 'google/apis/civicinfo_v2'
+
+
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5, '0')[0..4]
+end
+
+def legislators_by_zipcode(zip)
+  civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+  civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+  begin
+    legislators = civic_info.representative_info_by_address(
+      address: zip,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    )
+    legislators = legislators.officials
+    legislator_names = legislators.map(&:name)
+    legislator_names.join(", ")
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  legislators = legislators_by_zipcode(zipcode)
+
+  puts "#{name} #{zipcode} #{legislators}"
+end
+```
+
+An additional benefit of this implementation is that it encapsulates how we actually retrieve the names of the legislators. This will be of benefit later if we decide on an alternative to the google-api gem or want to introduce a level of caching to prevent look ups for similar zip codes.
