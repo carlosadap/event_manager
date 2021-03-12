@@ -877,3 +877,417 @@ end
 ```
 
 An additional benefit of this implementation is that it encapsulates how we actually retrieve the names of the legislators. This will be of benefit later if we decide on an alternative to the google-api gem or want to introduce a level of caching to prevent look ups for similar zip codes.
+
+## Iteration 4: Form Letters
+
+We have our attendees and their respective representatives. We can now generate a personalized call to action.
+
+For each attendee we want to include a customized letter that thanks them for attending the conference and provides a list of their representatives. Something that looks like:
+
+```html
+<html>
+<head>
+  <meta charset='utf-8'>
+  <title>Thank You!</title>
+</head>
+<body>
+  <h1>Thanks FIRST_NAME!</h1>
+  <p>Thanks for coming to our conference.  We couldn't have done it without you!</p>
+
+  <p>
+    Political activism is at the heart of any democracy and your voice needs to be heard.
+    Please consider reaching out to your following representatives:
+  </p>
+
+  <table>
+    <tr><th>Legislators</th></tr>
+    <tr><td>LEGISLATORS</td></tr>
+  </table>
+</body>
+</html>
+```
+
+### Storing our template to a file
+
+We could define this template as a large string within our current application.
+
+```ruby
+form_letter = %{
+  <html>
+  <head>
+    <title>Thank You!</title>
+  </head>
+  <body>
+    <h1>Thanks FIRST_NAME!</h1>
+    <p>Thanks for coming to our conference.  We couldn't have done it without you!</p>
+
+    <p>
+      Political activism is at the heart of any democracy and your voice needs to be heard.
+      Please consider reaching out to your following representatives:
+    </p>
+
+    <table>
+      <tr><th>Legislators</th></tr>
+      <tr><td>LEGISLATORS</td></tr>
+    </table>
+  </body>
+  </html>
+}
+```
+
+Ruby has quite a few ways that we can define strings. This format `%{ String Contents }` is one choice when defining a string that spans multiple lines.
+
+However, placing this large blob of text, this template, within our application will make it much more difficult to understand the template and the application code and thus make it more difficult to change the template and the application code.
+
+Instead of including the template within our application, we will instead load the template using the same File tools we used at the beginning of the exercise.
+
+- Create a file named ‘form_letter.html’ in the root of your project directory.
+- Copy the html template defined above into that file and save it.
+
+Within our application we will load our template:
+
+```ruby
+template_letter = File.read('form_letter.html')
+```
+
+It is important to define the `form_letter.html` file in the root of project directory and not in the lib directory. This is because when the application runs it assumes the place that you started the application is where all file references will be located. Later, we move the file to a new location and are more explicit on defining the location of the template.
+
+### `gsub` and `gsub`!
+### Replacing with gsub and gsub!
+
+For each of our attendees we want to replace the `FIRST_NAME` and `LEGISLATORS` with their respective values.
+
+- We need to find all instances of `FIRST_NAME` and replace them with the individual’s first name.
+- We need to find all instances of `LEGISLATORS` and replace them with the individual’s representatives.
+
+Our template is a String of text which has two methods for replacing text: [String#gsub](http://rubydoc.info/stdlib/core/String#gsub-instance_method) and [String#gsub!](http://rubydoc.info/stdlib/core/String#gsub%21-instance_method).
+
+These two methods are almost identical save for one important difference. The method `gsub` returns a **new copy** of the original string with the values replaced. Whereas `gsub!` will **replace** the values in the original string.
+
+We have our template letter which we want to use for every attendee. It is important that we create a new copy of this letter for each attendee. If we change the original template, they’d all have the same name! By making a copy and then changing the copy, we’re sure everyone’s name is unique.
+
+```ruby
+template_letter = File.read('form_letter.html')
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  legislators = legislators_by_zipcode(zipcode)
+
+  personal_letter = template_letter.gsub('FIRST_NAME', name)
+  personal_letter.gsub!('LEGISLATORS', legislators)
+
+  puts personal_letter
+end
+```
+
+We replace the first name in the template letter and return a new copy (Thanks [String#gsub](http://rubydoc.info/stdlib/core/String#gsub-instance_method)). We save the new letter to a personal version of the letter `personal_letter`. We then replace all the legislators with our legislators information in `personal_letter` (Thanks [String#gsub!](http://rubydoc.info/stdlib/core/String#gsub%21-instance_method)).
+
+Methods like `gsub` and `gsub!` can often be confusing and when to use one over the other may not be immediately clear. The above template manipulation could have been written with just `gsub`:
+
+```ruby
+personal_letter = template_letter.gsub('FIRST_NAME', name)
+personal_letter = personal_letter.gsub('LEGISLATORS', legislators)
+```
+
+### Our Template System has Problems
+
+It is a treacherous road we start to walk, defining our own templating language. Our current system has some flaws:
+
+- Using FIRST_NAME and LEGISLATORS to find and replace might cause us problems if later somehow this text appears in any of our templates.
+
+Though not likely, imagine if a person’s name contained the word ‘LEGISLATORS’. When we perform the second replacement operation, that part of the person’s name would also be replaced. This is unlikely in our simple template, but as our template grows, we may invite such disasters.
+
+- We cannot represent multiple items very easily if they are surrounded by HTML.
+
+Currently we copied our legislators string into a single table column. We would have a hard time inserting our legislators as individual rows in the table without having to build parts of the HTML table ourself. This could spell disaster later if we decide to change the template to no longer use a table.
+
+So again, instead of building our own custom solution any further, we are going to seek a solution.
+
+### Ruby’s ERB
+
+Ruby defines a template language named [ERB](http://rubydoc.info/stdlib/erb/frames).
+
+ERB provides an easy to use but powerful templating system for Ruby. Using ERB, actual Ruby code can be added to any plain text document for the purposes of generating document information details and/or flow control.
+
+Defining an ERB template is extremely similar to our existing template. The difference is that we use escape sequence tags which allow us to insert any variables, methods or ruby code we want to execute.
+
+ERB defines several different escape sequence tags that we can use. The most common are:
+
+```ruby
+<%= ruby code will execute and show output %>
+<% ruby code will execute but not show output %>
+```
+
+We can define our ERB escape tags within any string. The ruby defined within the contents of the ERB tags will not be evaluated until we ask the template to give us the results.
+
+```ruby
+require 'erb'
+
+meaning_of_life = 42
+
+question = "The Answer to the Ultimate Question of Life, the Universe, and Everything is <%= meaning_of_life %>"
+template = ERB.new question
+
+results = template.result(binding)
+puts results
+```
+
+The code above loads the ERB library, then creates a new ERB template with the `question` string. The question string contains ERB tags that will show the results of the variable `meaning_of_life`. We send the `result` message to the template with `binding`.
+
+- What is `binding`?
+
+The method [binding](http://rubydoc.info/stdlib/core/Kernel#binding-instance_method) returns a special object. This object is an instance of [Binding](http://rubydoc.info/stdlib/core/Kernel#binding-instance_method). An instance of binding knows all about the current state of variables and methods within the given scope. In this case, `binding` knows about the variable `meaning_of_life`.
+
+Having to explicitly specify a binding when we ask for the results of the template gives us the flexibility to ask for the results of a template given a different binding.
+
+### Defining an ERB Template
+
+To use ERB we need to update our current template **form_letter.html**.
+
+- Save a new template as form_letter.erb
+
+The convention is to save ERB template files with the extension erb. This is not a requirement. It is a benefit to yourself and other users when they return to the application.
+
+- Update our existing keywords with the ERB escape sequences
+
+```html
+<html>
+<head>
+  <meta charset='utf-8'>
+  <title>Thank You!</title>
+</head>
+<body>
+  <h1>Thanks <%= name %></h1>
+  <p>Thanks for coming to our conference.  We couldn't have done it without you!</p>
+
+  <p>
+    Political activism is at the heart of any democracy and your voice needs to be heard.
+    Please consider reaching out to your following representatives:
+  </p>
+
+  <table>
+    <% if legislators.kind_of?(Array) %>
+      <th>Name</th><th>Website</th>
+        <% legislators.each do |legislator| %>
+        <tr>
+          <td><%= "#{legislator.name}" %></td>
+          <td><%= "#{legislator.urls.join}" unless legislator.urls.nil? %></td>
+        </tr>
+        <% end %>
+    <% else %>
+      <th></th>
+      <td><%= "#{legislators}" %></td>
+    <% end %>
+  </table>
+</body>
+</html>
+```
+
+The use of the ERB tags to display the attendee’s name is familiar from our previous example. The second use, when we display the legislators, is different. We are using the ERB tag that does not output the results `<% %>` to check if the legislators variable is an Array.
+
+If it is an array, we output the name and website url of each legislator. This is a departure from what we originally implemented. Before we had to build the names of all the representatives. We intend now to give the template direct access to the array of legislators. We will let the template ask and display what it wants from each legislator.
+
+If `legislators` is not an array, it means that the `legislators_by_zipcode` method entered the rescue clause, which outputs a string. We simply want to display that string.
+
+### Using ERB
+
+We now need to update our application to:
+
+- Require the ERB library
+- Create the ERB template from the contents of the template file
+- Simplify our legislators_by_zipcode to return the original array of legislators
+
+```ruby
+require 'csv'
+require 'google/apis/civicinfo_v2'
+require 'erb'
+
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5,"0")[0..4]
+end
+
+def legislators_by_zipcode(zip)
+  civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+  civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+  begin
+    civic_info.representative_info_by_address(
+      address: zip,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    ).officials
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+template_letter = File.read('form_letter.erb')
+erb_template = ERB.new template_letter
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  legislators = legislators_by_zipcode(zipcode)
+
+  form_letter = erb_template.result(binding)
+  puts form_letter
+end
+```
+
+- Require the ERB library
+
+First we need to tell Ruby that we want it to load the ERB library. This is done through the `require` method which accepts a parameter of the functionality to load.
+
+- Create the ERB template from the contents of the template file
+
+Creating our template from our new template file requires us to load the file contents as a string and provide them as a parameter when creating the new ERB template.
+
+```ruby
+template_letter = File.read('form_letter.erb')
+erb_template = ERB.new template_letter
+```
+
+Simplify our `legislators_by_zipcode` to return the original array of legislators
+
+```ruby
+def legislators_by_zipcode(zip)
+  civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+  civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+  begin
+    civic_info.representative_info_by_address(
+      address: zip,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    ).officials
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+end
+```
+
+### Outputting form letters to a file
+
+Outputting each form letter to the screen was useful for ensuring our output looked correct. It is time to save each form letter to a file.
+
+Each file should be uniquely named. Fortunately, each of our attendees has a unique id—the first column, or row number.
+
+- Assign an ID for the attendee
+- Create an output folder
+- Save each form letter to a file based on the id of the attendee
+
+```ruby
+contents.each do |row|
+  id = row[0]
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  legislators = legislators_by_zipcode(zipcode)
+
+  form_letter = erb_template.result(binding)
+
+  Dir.mkdir('output') unless Dir.exists?('output')
+
+  filename = "output/thanks_#{id}.html"
+
+  File.open(filename, 'w') do |file|
+    file.puts form_letter
+  end
+
+end
+```
+
+- Assign an ID for the attendee
+
+The first column does not have a name like the other columns, so we fall back to using the index value.
+
+- Create an output folder
+
+We make a directory named “output” if a directory named “output” does not already exist.
+
+```ruby
+Dir.mkdir('output') unless Dir.exists?('output')
+```
+
+- Save each form letter to a file based on the id of the attendee
+
+[File#open](http://rubydoc.info/stdlib/core/File#open-class_method) allows us to open a file for reading and writing. The first parameter is the name of the file. The second parameter is a flag that states how we want to open the file. The w states we want to open the file for writing. If the file already exists it will be destroyed.
+
+Afterwards we actually send the entire form letter content to the file object. The `file` object responds to the message `puts`. The method [IO#puts](http://rubydoc.info/stdlib/core/IO#puts-instance_method), from which the `file` object inherits, is similar to [Kernel#puts](http://rubydoc.info/stdlib/core/Kernel#puts-instance_method) which we have been using up to this point.
+
+### Moving Form Letter Generation to a Method
+
+Again, for the sake of writing clean and clear code, we want to move the operation of saving the form letter to its own method:
+
+```ruby
+require 'csv'
+require 'google/apis/civicinfo_v2'
+require 'erb'
+
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5,"0")[0..4]
+end
+
+def legislators_by_zipcode(zip)
+  civic_info = Google::Apis::CivicinfoV2::CivicInfoService.new
+  civic_info.key = 'AIzaSyClRzDqDh5MsXwnCWi0kOiiBivP6JsSyBw'
+
+  begin
+    civic_info.representative_info_by_address(
+      address: zip,
+      levels: 'country',
+      roles: ['legislatorUpperBody', 'legislatorLowerBody']
+    ).officials
+  rescue
+    'You can find your representatives by visiting www.commoncause.org/take-action/find-elected-officials'
+  end
+end
+
+def save_thank_you_letter(id,form_letter)
+  Dir.mkdir('output') unless Dir.exists?('output')
+
+  filename = "output/thanks_#{id}.html"
+
+  File.open(filename, 'w') do |file|
+    file.puts form_letter
+  end
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+template_letter = File.read('form_letter.erb')
+erb_template = ERB.new template_letter
+
+contents.each do |row|
+  id = row[0]
+  name = row[:first_name]
+  zipcode = clean_zipcode(row[:zipcode])
+  legislators = legislators_by_zipcode(zipcode)
+
+  form_letter = erb_template.result(binding)
+
+  save_thank_you_letter(id,form_letter)
+end
+```
+
+The method `save_thank_you_letter` requires the id of the attendee and the form letter output.
