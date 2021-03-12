@@ -333,3 +333,252 @@ end
 We now are able to output the name of the individual and their zipcode.
 
 Now that we are able to visualize both pieces of data we realize that we have a problem….
+
+## Iteration 2: Cleaning up our Zip Codes
+
+The zip codes in our small sample show us:
+
+- Most zip codes are correctly expressed as a five-digit number
+- Some zip codes are represented with fewer than five digits
+- Some zip codes are missing
+
+Before we are able to figure out our attendees’ representatives, we need to solve the second issue and the third issue.
+
+- Some zip codes are represented with fewer than five digits
+
+If we looked at the [larger sample of data](https://raw.githubusercontent.com/TheOdinProject/curriculum/master/ruby_programming/files_and_serialization/event_attendees_full.csv), we would see that the majority of the shorter zip codes are from states in the north-eastern part of the United States. Many zip codes there start with 0. This data was likely stored in the database as an integer, and not as text, which caused the leading zeros to be removed.
+
+So in the case of zip codes of fewer than five digits, we will assume that we can pad missing zeros to the front.
+
+- Some zip codes are missing
+
+Some of our attendees are missing a zip code. It is likely that they forgot to enter the data when they filled out the form. The zip code data was not likely marked as mandatory and so our future attendees were not presented with an error message.
+
+We could try to figure out the zip code based on the rest of the address provided. But we could be wrong with our guess, so instead we will use a default, bad zip code of “00000”.
+
+### Pseudocode for Cleaning Zip Codes
+
+Before we start to explore a solution with Ruby code it is often helpful to express what we are hoping to accomplish in English words.
+
+```ruby
+require 'csv'
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv', 
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+  zipcode = row[:zipcode]
+
+  # if the zip code is exactly five digits, assume that it is ok
+  # if the zip code is more than five digits, truncate it to the first five digits
+  # if the zip code is less than five digits, add zeros to the front until it becomes five digits
+
+  puts "#{name} #{zipcode}"
+ end
+```
+
+- if the zip code is exactly five digits, assume that it is ok
+
+In the case when the zip code is five digits in length we have it easy. We simply want to do nothing.
+
+- if the zip code is more than five digits, truncate it to the first five digits
+
+While zip codes can be expressed with additional resolution (more digits after a dash), we are only interested in the first five digits.
+
+- if the zip code is less than five digits, add zeros to the front until it becomes five digits
+
+There are many possible ways that we can solve this issue. These are a few paths:
+
+- Use a `while` or `until` loop to prepend zeros until the length is five
+- Calculate the length of the current zip code and add missing zeros to the front
+- Add five zeros to the front of the current zip code and then trim the last five digits
+- Use [String#rjust](http://rubydoc.info/stdlib/core/String#rjust-instance_method) to append zeros to the front of the string.
+
+### Handling Bad and Good Zip Codes
+
+The following solution employs:
+
+- [String#length](http://rubydoc.info/stdlib/core/String#length-instance_method) - returns the length of the string.
+- [String#rjust](http://rubydoc.info/stdlib/core/String#rjust-instance_method) - to pad the string with zeros.
+- [String#slice](http://rubydoc.info/stdlib/core/String#slice-instance_method) - to create sub-strings either through the `slice` method or the array-like notation `[]`
+
+```ruby
+require 'csv'
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv', 
+  headers: true, 
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+  zipcode = row[:zipcode]
+
+  if zipcode.length < 5
+    zipcode = zipcode.rjust(5, '0')
+  elsif zipcode.length > 5
+    zipcode = zipcode[0..4]
+  end
+
+  puts "#{name} #{zipcode}"
+end
+```
+
+- When we run our application, we see the first few lines output correctly and then the application terminates.
+
+```ruby
+$ ruby lib/event_manager.rb
+EventManager initialized.
+Allison 20010
+SArah 20009
+Sarah 33703
+David 07306
+lib/event_manager.rb:11:in `block in <main>': undefined method `length' for nil:NilClass (NoMethodError)
+	from /Users/burtlo/.rvm/rubies/ruby-1.9.3-p374/lib/ruby/1.9.1/csv.rb:1792:in `each'
+	from lib/event_manager.rb:7:in `<main>'
+```
+
+- What is the error message “undefined method ‘length’ for nil:NilClass (NoMethodError)” saying?
+
+Reviewing our CSV data, we notice that the next row specifies no value. An empty field translates into a nil instead of an empty string. This is a choice made by the CSV library maintainers. So we now need to handle this situation.
+
+### Handling Missing Zip Codes
+
+Our solution above does not handle the case when the zip code has not been specified. CSV returns a `nil` value when no value has been specified in the column. All objects in Ruby respond to `#nil?`. All objects will return false except for a `nil`.
+
+We can update our implementation to handle this new case by simply adding a check for `nil?`.
+
+```ruby
+require 'csv'
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+  zipcode = row[:zipcode]
+
+  if zipcode.nil?
+    zipcode = '00000'
+  elsif zipcode.length < 5
+    zipcode = zipcode.rjust(5, '0')
+  elsif zipcode.length > 5
+    zipcode = zipcode[0..4]
+  end
+
+  puts "#{name} #{zipcode}"
+end
+```
+
+```ruby
+$ ruby lib/event_manager.rb
+EventManager initialized.
+Allison 20010
+SArah 20009
+Sarah 33703
+David 07306
+Chris 00000
+Aya 90210
+Mary Kate 21230
+Audrey 95667
+Shiyu 96734
+Eli 92037
+Colin 02703
+Megan 43201
+Meggie 94611
+Laura 00924
+Paul 14517
+Shannon 03082
+Shannon 98122
+Nash 98122
+Amanda 14841
+```
+
+### Moving Clean Zip Codes to a Method
+
+It is important for us to take a look at our implementation. During this examination we should ask ourselves:
+
+- Does the code clearly express what it is trying to accomplish?
+
+The implementation does a decent job at expressing what it accomplishes. The biggest problem is that it is expressing this near so many other concepts. To make this implementation clearer we should move this logic into its own method named `clean_zipcode`.
+
+```
+require 'csv'
+
+def clean_zipcode(zipcode)
+  if zipcode.nil?
+    '00000'
+  elsif zipcode.length < 5
+    zipcode.rjust(5, '0')
+  elsif zipcode.length > 5
+    zipcode[0..4]
+  else
+    zipcode
+  end
+end
+
+puts 'EventManager initialized.'
+
+contents = CSV.open(
+  'event_attendees.csv',
+  headers: true,
+  header_converters: :symbol
+)
+
+contents.each do |row|
+  name = row[:first_name]
+
+  zipcode = clean_zipcode(row[:zipcode])
+
+  puts "#{name} #{zipcode}"
+end
+```
+
+This may feel like a very small, inconsequential change, but small changes like these help make your code cleaner and your intent clearer.
+
+### Refactoring Clean Zip Codes
+With our clean zip code logic tucked away in our `clean_zipcode` method, we can examine it further to see if we can make it even more succinct.
+
+- Coercion over Questions
+
+A good rule when developing in Ruby is to favor coercing values into similar values so that they will behave the same. We have a special case to deal specifically with a `nil` value. It would be much easier if instead of checking for a nil value, we convert the `nil` into a string with [NilClass#to_s](http://rubydoc.info/stdlib/core/NilClass#to_s-instance_method).
+
+```ruby
+$ nil.to_s
+=> ""
+```
+
+Examining [String#rjust](http://rubydoc.info/stdlib/core/String#rjust-instance_method) in irb, we can see that when we provide a string with a length greater than five, it performs no work. This means we can apply it in both cases, as it will have the same intended effect.
+
+```ruby
+$ "123456".rjust(5, '0')
+=> "123456"
+```
+
+Lastly, examining [String#slice](http://rubydoc.info/stdlib/core/String#slice-instance_method) in irb, we can see that for a number that is exactly five digits in length, it has no effect. This also means we can apply it in cases when the zip code is five or more digits, and it will have the same effect.
+
+```ruby
+$ "12345"[0..4]
+=> "12345"
+```
+
+Combining all of these steps together, we can write a more succinct `clean_zipcode` method:
+
+```ruby
+def clean_zipcode(zipcode)
+  zipcode.to_s.rjust(5, '0')[0..4]
+end
+```
