@@ -110,6 +110,7 @@
 require 'csv'
 require 'google/apis/civicinfo_v2'
 require 'erb'
+require 'date'
 
 def clean_zipcode(zipcode)
   zipcode.to_s.rjust(5, "0")[0..4]
@@ -168,6 +169,8 @@ contents = CSV.open(
 template_letter = File.read('form_letter.erb')
 erb_template = ERB.new template_letter
 
+reg_dates = Hash.new(0)
+
 contents.each do |row|
   id = row[0]
   name = row[:first_name]
@@ -176,10 +179,17 @@ contents.each do |row|
 
   phone = clean_phone(row[:homephone])
 
+  date = Date.strptime(row[:regdate], "%m/%d/%y")
+  reg_dates[date] += 1
+  
   legislators = legislators_by_zipcode(zipcode)
 
   form_letter = erb_template.result(binding)
 
-  save_thank_you_letter(id, form_letter)
+  # save_thank_you_letter(id, form_letter)
+
 end
+
+puts reg_dates.key(reg_dates.values.max)
+
 

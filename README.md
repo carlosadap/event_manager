@@ -1316,7 +1316,8 @@ Using the registration date and time we want to find out what the peak registrat
 
 - Explore the documentation to become familiar with the available methods, especially `#strptime`, `#strftime`, and `#hour`.
 
-Assignment: Day of the Week Targeting
+### Assignment: Day of the Week Targeting
+
 The big boss gets excited about the results from your hourly tabulations. It looks like there are some hours that are clearly more important than others. But now, tantalized, she wants to know “What days of the week did most people register?”
 
 - Use [Date#wday](https://rubyapi.org/2.7/o/date#method-i-wday) to find out the day of the week.
