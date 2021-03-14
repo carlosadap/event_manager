@@ -170,6 +170,8 @@ template_letter = File.read('form_letter.erb')
 erb_template = ERB.new template_letter
 
 reg_dates = Hash.new(0)
+reg_hours = Hash.new(0)
+reg_weekdays = Hash.new(0)
 
 contents.each do |row|
   id = row[0]
@@ -178,9 +180,16 @@ contents.each do |row|
   zipcode = clean_zipcode(row[:zipcode])
 
   phone = clean_phone(row[:homephone])
+  
+  date, hour = row[:regdate].split(" ")
 
-  date = Date.strptime(row[:regdate], "%m/%d/%y")
-  reg_dates[date] += 1
+  date = Date.strptime(date, "%m/%d/%y")
+  weekday = date.strftime("%A")
+  hour = DateTime.strptime(hour, "%H:%M").hour
+
+  reg_dates[date.day] += 1
+  reg_weekdays[weekday] += 1
+  reg_hours[hour] += 1
   
   legislators = legislators_by_zipcode(zipcode)
 
@@ -190,6 +199,8 @@ contents.each do |row|
 
 end
 
-puts reg_dates.key(reg_dates.values.max)
+puts "Top registration day: #{reg_dates.key(reg_dates.values.max)}"
+puts "Top registration weekday: #{reg_weekdays.key(reg_weekdays.values.max)}"
+puts "Top registration hour: #{reg_hours.key(reg_hours.values.max)}h"
 
 
