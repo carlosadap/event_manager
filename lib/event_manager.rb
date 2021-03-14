@@ -158,6 +158,18 @@ def save_thank_you_letter(id, form_letter)
   end
 end
 
+def reg_info(info, reg_dates, reg_hours, reg_weekdays)
+  date, hour = info
+  
+  date = Date.strptime(date, "%m/%d/%y")
+  weekday = date.strftime("%A")
+  hour = DateTime.strptime(hour, "%H:%M").hour
+
+  reg_dates[date.day] += 1
+  reg_weekdays[weekday] += 1
+  reg_hours[hour] += 1
+end
+
 puts 'EventManager initialized.'
 
 contents = CSV.open(
@@ -181,15 +193,8 @@ contents.each do |row|
 
   phone = clean_phone(row[:homephone])
   
-  date, hour = row[:regdate].split(" ")
-
-  date = Date.strptime(date, "%m/%d/%y")
-  weekday = date.strftime("%A")
-  hour = DateTime.strptime(hour, "%H:%M").hour
-
-  reg_dates[date.day] += 1
-  reg_weekdays[weekday] += 1
-  reg_hours[hour] += 1
+  info = row[:regdate].split(" ")
+  reg_info(info, reg_dates, reg_hours, reg_weekdays)
   
   legislators = legislators_by_zipcode(zipcode)
 
